@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cafe Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for the application */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #map {
+            height: 100vh;
+        }
+        /* Custom scrollbar for cafe list */
+        #cafe-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        #cafe-list::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        #cafe-list::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        #cafe-list::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        /* Loader animation */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .loader {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 antialiased">
+
+    <div class="flex flex-col md:flex-row h-screen w-screen overflow-hidden">
+
+        <!-- Sidebar for listing cafes -->
+        <div class="w-full md:w-1/3 lg:w-1/4 h-1/2 md:h-full flex flex-col bg-white shadow-lg z-10">
+            <header class="p-4 border-b bg-indigo-600 text-white">
+                <h1 class="text-2xl font-bold">Cafe Finder</h1>
+                <p class="text-indigo-200">Discover cafes near you</p>
+            </header>
+            
+            <div id="list-container" class="flex-grow p-4 overflow-y-auto">
+                <!-- Loading indicator -->
+                <div id="loader" class="flex flex-col items-center justify-center h-full">
+                    <div class="loader"></div>
+                    <p class="mt-4 text-gray-600">Finding your location and nearby cafes...</p>
+                </div>
+                <!-- Cafe list will be populated here -->
+                <div id="cafe-list" class="space-y-3"></div>
+                 <!-- Message area for errors or info -->
+                <div id="message-area" class="text-center text-gray-500 p-8 hidden"></div>
+            </div>
+        </div>
+
+        <!-- Google Map will be displayed here -->
+        <div id="map" class="w-full h-1/2 md:h-full"></div>
+
+    </div>
+
+    <!-- 
+        IMPORTANT: Replace "YOUR_API_KEY" below with your actual Google Maps Platform API key.
+        You need to enable the "Maps JavaScript API" and the "Places API" for your key.
+    -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyClDIJqbGRQJcVNWfU2n4sK6y5HrDanQO8&libraries=places&callback=initMap" async defer></script>
+
+    <script>
+        let map;
+        let placesService;
+        let infoWindow;
+        const markers = [];
+
+        // Main function to initialize the map and services
+        function initMap() {
+            // Default location (Bhopal, India) if geolocation fails
+            const defaultLocation = { lat: 23.2599, lng: 77.4126 };
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const userLocation = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                        };
+                        createMap(userLocation);
+                        searchCafes(userLocation);
+                    },
+                    () => {
+                        // Geolocation failed, create map with default location first.
+                        createMap(defaultLocation);
+                        handleLocationError(true);
+                        searchCafes(defaultLocation);
+                    }
+                );
+            } else {
+                // Browser doesn't support Geolocation, create map with default location first.
+                createMap(defaultLocation);
+                handleLocationError(false);
+                searchCafes(defaultLocation);
+            }
+        }
+
+        // Handles geolocation errors
+        function handleLocationError(browserHasGeolocation) {
+            const messageArea = document.getElementById('message-area');
+            messageArea.textContent = browserHasGeolocation
+                ? "Geolocation service failed. We've defaulted to a central location."
+                : "Your browser doesn't support geolocation.";
+            messageArea.classList.remove('hidden');
+        }
+
+
+        // Function to create and display the map
+        function createMap(location) {
+             map = new google.maps.Map(document.getElementById("map"), {
+                center: location,
+                zoom: 15,
+                mapTypeControl: false,
+                streetViewControl: false,
+                styles: [
+                    { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+                    { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+                    { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+                    { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+                    { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
+                    { featureType: "administrative.neighborhood", stylers: [{ visibility: "off" }] },
+                    { featureType: "poi", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
+                    { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+                    { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+                    { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+                    { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+                    { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+                    { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
+                    { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+                    { featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+                    { featureType: "transit.line", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+                    { featureType: "transit.station", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
+                    { featureType: "water", elementType: "geometry", stylers: [{ color: "#c9c9c9" }] },
+                    { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+                ]
+            });
+            infoWindow = new google.maps.InfoWindow();
+        }
+
+        // Searches for cafes near the given location
+        function searchCafes(location) {
+            const request = {
+                location: location,
+                radius: '2000', // search within a 2km radius
+                type: ['cafe'],
+            };
+            placesService = new google.maps.places.PlacesService(map);
+            placesService.nearbySearch(request, (results, status) => {
+                document.getElementById('loader').style.display = 'none';
+                if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                    if(results.length === 0){
+                         const messageArea = document.getElementById('message-area');
+                         messageArea.textContent = 'No cafes found in your vicinity. Try zooming out or panning the map.';
+                         messageArea.classList.remove('hidden');
+                         return;
+                    }
+                    // Sort results by rating
+                    results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+
+                    for (let i = 0; i < results.length; i++) {
+                        createMarker(results[i]);
+                        addCafeToList(results[i], i);
+                    }
+                } else {
+                     const messageArea = document.getElementById('message-area');
+                     messageArea.textContent = 'Could not fetch cafes. Please check your connection or API key.';
+                     messageArea.classList.remove('hidden');
+                }
+            });
+        }
+
+        // Creates a marker on the map for a cafe
+        function createMarker(place) {
+            if (!place.geometry || !place.geometry.location) return;
+
+            const marker = new google.maps.Marker({
+                map,
+                position: place.geometry.location,
+                animation: google.maps.Animation.DROP,
+                icon: {
+                    url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#4f46e5" width="36px" height="36px"><path d="M0 0h24v24H0z" fill="none"/><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.9 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg>'),
+                    scaledSize: new google.maps.Size(36, 36),
+                },
+                title: place.name
+            });
+
+            markers.push(marker);
+
+            google.maps.event.addListener(marker, "click", () => {
+                const isOpen = place.opening_hours && place.opening_hours.isOpen() ? 
+                    '<span class="text-green-600 font-semibold">Open Now</span>' : 
+                    '<span class="text-red-600 font-semibold">Closed</span>';
+
+                const rating = place.rating ? 
+                    `<span>⭐ ${place.rating} (${place.user_ratings_total} reviews)</span>` :
+                    '<span class="text-gray-500">No rating available</span>';
+
+                const content = `
+                    <div class="p-2 max-w-xs">
+                        <h3 class="font-bold text-lg mb-1">${place.name}</h3>
+                        <p class="text-gray-600">${place.vicinity}</p>
+                        <div class="mt-2 flex justify-between items-center text-sm">
+                            ${rating}
+                            ${isOpen}
+                        </div>
+                    </div>`;
+
+                infoWindow.setContent(content);
+                infoWindow.open(map, marker);
+                map.panTo(place.geometry.location);
+            });
+        }
+
+        // Adds a cafe to the sidebar list
+        function addCafeToList(place, index) {
+            const cafeList = document.getElementById('cafe-list');
+            const listItem = document.createElement('div');
+            listItem.className = 'p-4 border rounded-lg cursor-pointer hover:bg-indigo-50 hover:shadow-md transition-all duration-200';
+            
+            const ratingHtml = place.rating ? `
+                <div class="flex items-center text-sm text-yellow-500">
+                    <svg class="w-4 h-4 mr-1 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+                    <span>${place.rating} (${place.user_ratings_total || 0})</span>
+                </div>
+            ` : `<p class="text-sm text-gray-400">No rating</p>`;
+
+            const openStatusHtml = place.opening_hours ? (place.opening_hours.isOpen() ?
+                `<p class="text-sm font-medium text-green-600">Open</p>` :
+                `<p class="text-sm font-medium text-red-600">Closed</p>`) : '';
+
+            listItem.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h3 class="font-semibold text-indigo-800">${place.name}</h3>
+                        <p class="text-gray-600 text-sm">${place.vicinity}</p>
+                    </div>
+                    ${openStatusHtml}
+                </div>
+                <div class="mt-2">
+                    ${ratingHtml}
+                </div>
+            `;
+
+            listItem.addEventListener('click', () => {
+                // When list item is clicked, trigger the corresponding marker's click event
+                google.maps.event.trigger(markers[index], 'click');
+                
+                // Highlight the selected item
+                document.querySelectorAll('#cafe-list > div').forEach(child => {
+                    child.classList.remove('bg-indigo-100', 'ring-2', 'ring-indigo-400');
+                });
+                listItem.classList.add('bg-indigo-100', 'ring-2', 'ring-indigo-400');
+            });
+
+            cafeList.appendChild(listItem);
+        }
+
+    </script>
+</body>
+</html>
+
